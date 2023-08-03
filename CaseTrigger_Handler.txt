@@ -1,0 +1,60 @@
+public class CaseTrigger_Handler {
+    
+    public static void handleBeforeInsertUpdate(List<Case> caseList) {
+        Set<Id> caseIdsToUpdateNC = new Set<Id>();
+        Map<Id, Id> mapCaseIdToNCId = new Map<Id, Id>();
+        
+        for (Case newCase : caseList) {
+            if (newCase.Type == 'Problem' && hasCaseAdminPermissionSet(newCase.CreatedById)) {
+                caseIdsToUpdateNC.add(newCase.Id);
+            }
+        }
+        
+        List<SQX_Nonconformance__c> nCList = [SELECT Id, Case__c FROM SQX_Nonconformance__c WHERE Case__c IN :caseIdsToUpdateNC];
+        
+        List<SQX_Nonconformance__c> nonCN = new List<SQX_Nonconformance__c>();
+        for (Case newCase : caseList) {
+            if (caseIdsToUpdateNC.contains(newCase.Id)) {
+                Boolean existsNC = false;
+                for (SQX_Nonconformance__c nonCon : nCList) {
+                    if (nonCon.Case__c == newCase.Id) {
+                        mapCaseIdToNCId.put(newCase.Id, nonCon.Id);
+                        existsNC = true;
+                        break;
+                    }
+                }
+                
+                if (!existsNC) {
+                    // Create a new Nonconformance record
+                    SQX_Nonconformance__c nonConformance = new SQX_Nonconformance__c();
+                    nonConformance.Case__c = newCase.Id;
+                    nonConformance.Priority__c = newCase.Priority;
+                    nonConformance.Title__c = newCase.Subject;
+                    nonConformance.Description__c = newCase.Description;
+                    nonConformance.QMS_Reference_Number__c = newCase.CaseNumber;
+                    nonCN.add(nonConformance);
+                }
+            }
+        }
+        
+        // Insert new Nonconformance records
+        if (!nonCN.isEmpty()) {
+            insert nonCN;
+            for (SQX_Nonconformance__c newNC : nonCN) {
+                mapCaseIdToNCId.put(newNC.Case__c, newNC.Id);
+            }
+        }
+        
+        // Update the Case records with the Nonconformance reference
+        for (Case newCase : caseList) {
+            if (mapCaseIdToNCId.containsKey(newCase.Id)) {
+                newCase.SQX_NC_Reference__c = mapCaseIdToNCId.get(newCase.Id);
+            }
+        }
+    }
+    
+    // Check if the user has the Case Admin permission set
+    private static Boolean hasCaseAdminPermissionSet(Id userId) {
+        return [SELECT Id FROM PermissionSetAssignment WHERE AssigneeId = :userId AND PermissionSet.Name = 'Case_Admin_Permission_Set'].size() > 0;
+    }
+}
